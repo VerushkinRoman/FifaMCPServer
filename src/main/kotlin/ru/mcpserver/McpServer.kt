@@ -25,7 +25,7 @@ fun main() {
 
     mcpServer.addTool(
         name = "register",
-        description = "Register a new user on the World Cup 2026 platform",
+        description = "Create a new user account on the World Cup 2026 platform. Requires a display name, a valid email address, and a password. Returns the user profile with ID, name, email, registration timestamp, and a JWT token for subsequent authenticated requests.",
         inputSchema = ToolSchema(
             properties = buildJsonObject {
                 put("name", buildJsonObject {
@@ -66,7 +66,7 @@ fun main() {
 
     mcpServer.addTool(
         name = "login",
-        description = "Login to the World Cup 2026 platform and save the auth token",
+        description = "Authenticate with an existing account using email and password. On success, the returned JWT token is automatically stored in the session and will be attached to all subsequent API requests that require authorization. The token is kept in memory until cleared with clear_token.",
         inputSchema = ToolSchema(
             properties = buildJsonObject {
                 put("email", buildJsonObject {
@@ -101,7 +101,7 @@ fun main() {
 
     mcpServer.addTool(
         name = "set_token",
-        description = "Set JWT token manually for authenticated requests",
+        description = "Manually set a JWT authentication token obtained from an external source (e.g. from a previous login session or another client). The token is stored in memory and will be sent as a Bearer token in the Authorization header of all subsequent API requests to the World Cup 2026 backend.",
         inputSchema = ToolSchema(
             properties = buildJsonObject {
                 put("token", buildJsonObject {
@@ -119,7 +119,7 @@ fun main() {
 
     mcpServer.addTool(
         name = "clear_token",
-        description = "Clear the stored JWT token"
+        description = "Remove the currently stored JWT authentication token from memory. After calling this tool, subsequent API requests will be sent without any Authorization header, effectively logging out the current user session."
     ) { _ ->
         api.clearToken()
         CallToolResult(content = listOf(TextContent("Token cleared.")))
@@ -127,7 +127,7 @@ fun main() {
 
     mcpServer.addTool(
         name = "get_groups",
-        description = "List all World Cup 2026 groups with standings table"
+        description = "List all 12 World Cup 2026 groups (A through L) with the teams assigned to each group. For each team, displays the team name, flag emoji, and FIFA ranking. This is a lightweight overview without standings data — use get_group with a specific letter to see the full standings table with points, matches played, wins, draws, losses, goals for/against, and goal difference."
     ) { _ ->
         try {
             val response = api.getGroups()
@@ -140,7 +140,8 @@ fun main() {
                     response.groups.forEach { group ->
                         appendLine("Group ${group.name}:")
                         group.teams?.forEach { t ->
-                            appendLine("  Team #${t.teamId} | P:${t.mp} W:${t.w} D:${t.d} L:${t.l} GF:${t.gf} GA:${t.ga} GD:${t.gd} PTS:${t.pts}")
+                            val flag = t.flag ?: ""
+                            appendLine("  $flag ${t.name} (FIFA Rank: ${t.fifaRank ?: "?"})")
                         }
                         appendLine()
                     }
@@ -155,12 +156,12 @@ fun main() {
 
     mcpServer.addTool(
         name = "get_group",
-        description = "Get a specific World Cup 2026 group by name (A-L)",
+        description = "Retrieve the full standings table for a specific World Cup 2026 group by supplying its letter (A through L). Returns each team's position, name, matches played (MP), wins (W), draws (D), losses (L), goals for (GF), goals against (GA), goal difference (GD), and points (PTS). Also lists all teams in the group with their flags and FIFA rankings.",
         inputSchema = ToolSchema(
             properties = buildJsonObject {
                 put("name", buildJsonObject {
                     put("type", "string")
-                    put("description", "Group name letter (A-L)")
+                    put("description", "Single letter from A to L identifying the World Cup 2026 group (e.g. A, B, C, ..., L)")
                 })
             },
             required = listOf("name")
@@ -172,14 +173,14 @@ fun main() {
             if (response.error != null) {
                 CallToolResult(content = listOf(TextContent("Error: ${response.error}")))
             } else {
-                val group = response.group
-                if (group == null) {
+                val standings = response.matchTable?.standings
+                if (standings.isNullOrEmpty()) {
                     CallToolResult(content = listOf(TextContent("Group not found.")))
                 } else {
                     val text = buildString {
-                        appendLine("Group ${group.name}:")
-                        group.teams?.forEach { t ->
-                            appendLine("  Team #${t.teamId} | P:${t.mp} W:${t.w} D:${t.d} L:${t.l} GF:${t.gf} GA:${t.ga} GD:${t.gd} PTS:${t.pts}")
+                        appendLine("Group ${response.name}:")
+                        standings.forEachIndexed { index, row ->
+                            appendLine("  ${index + 1}. ${row.teamName} | MP:${row.mp} W:${row.w} D:${row.d} L:${row.l} GF:${row.gf} GA:${row.ga} GD:${row.gd} PTS:${row.pts}")
                         }
                     }
                     CallToolResult(content = listOf(TextContent(text.trimEnd())))
@@ -192,7 +193,7 @@ fun main() {
 
     mcpServer.addTool(
         name = "get_teams",
-        description = "List all teams participating in World Cup 2026",
+        description = "Retrieve the full list of all 48 national teams participating in the World Cup 2026 tournament. For each team, displays the name, flag emoji, FIFA world ranking, and the group they are assigned to (A-L). Use get_team with a specific team name for detailed information including coach, captain, and players.",
         inputSchema = ToolSchema(
             properties = buildJsonObject {
             },
@@ -208,9 +209,8 @@ fun main() {
             } else {
                 val text = buildString {
                     response.teams.forEach { team ->
-                        val name = team.nameEn ?: team.nameFa ?: "?"
-                        val group = team.group ?: "?"
-                        appendLine("#${team.numericId} $name (FIFA: ${team.fifaCode ?: "?"}) Group: $group")
+                        val flag = team.flag ?: ""
+                        appendLine("$flag ${team.name} (FIFA Rank: ${team.fifaRank ?: "?"}) Group: ${team.group ?: "?"}")
                     }
                     append("Total teams: ${response.teams.size}")
                 }
@@ -223,12 +223,12 @@ fun main() {
 
     mcpServer.addTool(
         name = "get_team",
-        description = "Get detailed information about a specific team by name",
+        description = "Get comprehensive information about a specific national team by its full name (e.g. Brazil, Argentina, Germany). Returns the team's official name, FIFA ranking, flag emoji, group assignment, head coach, and team captain. For the full list of available teams, use get_teams first.",
         inputSchema = ToolSchema(
             properties = buildJsonObject {
                 put("name", buildJsonObject {
                     put("type", "string")
-                    put("description", "Team name (e.g. Brazil, Argentina, Germany)")
+                    put("description", "Full name of the national team in English, for example Brazil, Argentina, Germany, France, Spain, England, Portugal, Netherlands")
                 })
             },
             required = listOf("name")
@@ -245,11 +245,11 @@ fun main() {
                     CallToolResult(content = listOf(TextContent("Team not found.")))
                 } else {
                     CallToolResult(content = listOf(TextContent(buildString {
-                        appendLine("${team.nameEn} / ${team.nameFa}")
-                        appendLine("ID: #${team.numericId}")
-                        appendLine("FIFA Code: ${team.fifaCode ?: "?"}")
+                        appendLine(team.name ?: "?")
+                        appendLine("FIFA Rank: ${team.fifaRank ?: "?"}")
                         appendLine("Flag: ${team.flag ?: "?"}")
-                        append("Group: ${team.group ?: "?"}")
+                        appendLine("Group: ${team.group ?: "?"}")
+                        append("Coach: ${team.coach ?: "?"} | Captain: ${team.captain ?: "?"}")
                     })))
                 }
             }
@@ -260,7 +260,7 @@ fun main() {
 
     mcpServer.addTool(
         name = "get_games",
-        description = "List all World Cup 2026 matches",
+        description = "Retrieve the full schedule of all World Cup 2026 matches. Returns each match with its unique ID, home and away team names (with flag emojis), the score if the match has been played, the group or stage, the local date and time, and the match status. Use get_game with a specific match ID for detailed match statistics including scorers, assists, cards, and stadium information.",
         inputSchema = ToolSchema(
             properties = buildJsonObject {
             },
@@ -276,9 +276,9 @@ fun main() {
             } else {
                 val text = buildString {
                     response.games.forEach { game ->
-                        val home = game.homeTeamNameEn ?: game.homeTeamLabel ?: "?"
-                        val away = game.awayTeamNameEn ?: game.awayTeamLabel ?: "?"
-                        val score = if (game.finished == "TRUE") " ${game.homeScore}:${game.awayScore}" else " vs "
+                        val home = game.homeTeam?.name ?: game.homeTeamLabel ?: "?"
+                        val away = game.visitingTeam?.name ?: game.awayTeamLabel ?: "?"
+                        val score = if (game.finished == true) " ${game.homeScore}:${game.awayScore}" else " vs "
                         appendLine("${game.numericId}. $home$score$away [${game.group}] ${game.localDate}")
                     }
                     append("Total games: ${response.games.size}")
@@ -292,12 +292,12 @@ fun main() {
 
     mcpServer.addTool(
         name = "get_game",
-        description = "Get detailed information about a specific match by MongoDB ID",
+        description = "Get comprehensive details about a specific World Cup 2026 match using its MongoDB ObjectId (e.g. 679c9c8a5749c4077500e001). Returns the full match report including: home and away teams with flags, final score, goal scorers with minute markers, assists, yellow and red cards for each side, match status (finished/live/scheduled), elapsed time, group or stage, matchday number, date, stadium details (name, city, country, capacity), referee, and attendance. Use get_games first to obtain match IDs.",
         inputSchema = ToolSchema(
             properties = buildJsonObject {
                 put("id", buildJsonObject {
                     put("type", "string")
-                    put("description", "MongoDB ID of the game (e.g. 679c9c8a5749c4077500e001)")
+                    put("description", "24-character MongoDB ObjectId of the match (e.g. 679c9c8a5749c4077500e001). Can be obtained from the output of get_games where each match is listed with its unique ID.")
                 })
             },
             required = listOf("id")
@@ -313,17 +313,14 @@ fun main() {
                 if (game == null) {
                     CallToolResult(content = listOf(TextContent("Game not found.")))
                 } else {
-                    val home = game.homeTeamNameEn ?: game.homeTeamLabel ?: "Team #${game.homeTeamId}"
-                    val away = game.awayTeamNameEn ?: game.awayTeamLabel ?: "Team #${game.awayTeamId}"
+                    val home = game.homeTeam?.name ?: game.homeTeamLabel ?: "Team #${game.homeTeamId}"
+                    val away = game.visitingTeam?.name ?: game.awayTeamLabel ?: "Team #${game.awayTeamId}"
                     val status = when (game.finished) {
-                        "TRUE" -> "Finished"
-                        "FALSE" -> game.timeElapsed?.let {
-                            when (it.lowercase()) {
-                                "notstarted" -> "Not started"
-                                "finished" -> "Finished"
-                                else -> "Live $it'"
-                            }
-                        } ?: "Scheduled"
+                        true -> "Finished"
+                        false -> {
+                            val elapsed = game.timeElapsed
+                            if (elapsed != null && elapsed > 0) "Live ${elapsed}'" else "Not started"
+                        }
                         else -> "Scheduled"
                     }
                     CallToolResult(content = listOf(TextContent(buildString {
@@ -332,11 +329,11 @@ fun main() {
                         appendLine("Group: ${game.group} | Matchday: ${game.matchday}")
                         appendLine("Date: ${game.localDate}")
                         appendLine("Type: ${game.type}")
-                        if (game.homeScorers != null && game.homeScorers != "null") {
-                            appendLine("Scorers ($home): ${game.homeScorers}")
+                        if (!game.homeScorers.isNullOrEmpty()) {
+                            appendLine("Scorers ($home): ${game.homeScorers.joinToString(", ")}")
                         }
-                        if (game.awayScorers != null && game.awayScorers != "null") {
-                            append("Scorers ($away): ${game.awayScorers}")
+                        if (!game.awayScorers.isNullOrEmpty()) {
+                            append("Scorers ($away): ${game.awayScorers.joinToString(", ")}")
                         }
                     })))
                 }
@@ -348,7 +345,7 @@ fun main() {
 
     mcpServer.addTool(
         name = "get_stadiums",
-        description = "List all World Cup 2026 stadiums with location and capacity",
+        description = "List all stadiums hosting World Cup 2026 matches. Returns each venue with its full name, city and country location, seating capacity, and number of matches scheduled. Use this to find stadium details like the Maracanã in Rio de Janeiro, MetLife Stadium in New Jersey, or the Azteca in Mexico City.",
         inputSchema = ToolSchema(
             properties = buildJsonObject {
             },
@@ -364,7 +361,7 @@ fun main() {
             } else {
                 val text = buildString {
                     response.stadiums.forEach { s ->
-                        appendLine("${s.nameEn} (${s.cityEn}, ${s.countryEn}) - ${s.capacity} seats")
+                        appendLine("${s.name} (${s.city}, ${s.country}) - ${s.capacity} seats")
                     }
                     append("Total stadiums: ${response.stadiums.size}")
                 }
@@ -377,12 +374,12 @@ fun main() {
 
     mcpServer.addTool(
         name = "raw_get",
-        description = "Make a raw GET request to any API endpoint on the World Cup 2026 server",
+        description = "Make a direct HTTP GET request to any path or full URL on the World Cup 2026 backend server. Useful for accessing undocumented endpoints, debugging, or fetching raw JSON data that is not covered by the other dedicated tools. The path can be relative (e.g. /get/teams) or an absolute URL. The response is returned as raw text without any formatting or parsing.",
         inputSchema = ToolSchema(
             properties = buildJsonObject {
                 put("path", buildJsonObject {
                     put("type", "string")
-                    put("description", "API path (e.g. /get/teams) or full URL")
+                    put("description", "API endpoint path starting with / (e.g. /get/teams, /get/groups) or a full absolute URL to the World Cup 2026 server. The base URL (https://worldcup26.ir) is automatically prepended for relative paths.")
                 })
             },
             required = listOf("path")
