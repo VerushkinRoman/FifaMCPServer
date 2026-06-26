@@ -45,36 +45,102 @@ fun main() {
         description = """
 Aggregates World Cup 2026 data from a RawSnapshot and returns a structured summary with group standings, recent results, top scorers, and knockout matches.
 
-PARAMETERS:
-  - "raw_data" (string, REQUIRED): JSON string of a RawSnapshot object containing games, teams, and groups data.
+━━━ INPUT: "raw_data" (string, REQUIRED) ━━━
+A JSON string matching the RawSnapshot structure below.
+Typically obtained from the data-api server's search_all / search_games / search_teams / search_groups tools.
 
-RESPONSE FORMAT (JSON object):
-  {
-    "generated_at":      int (Unix timestamp in milliseconds),
-    "total_matches":     int (total number of matches),
-    "finished_matches":  int (matches with finished="TRUE"),
-    "upcoming_matches":  int (matches not yet finished),
-    "group_standings": [                                        // ALL groups A-L, 12 items
-      {
-        "_id":      string,
-        "name":     string (group letter A-L),
-        "teams": [                                              // 4 teams each, sorted by pts
-          { "team_id", "mp", "w", "l", "d", "pts", "gf", "ga", "gd", "_id" }
-        ]
-      }
-    ],
-    "recent_results": [                                         // last 20 finished, sorted by date
-      { "home_team", "away_team", "home_score", "away_score", "group", "date", "scorers" }
-    ],
-    "top_scorers": [                                            // sorted by goals descending
-      { "player", "goals": int, "team" }
-    ],
-    "knockout_matches": [                                       // R32, R16, QF, SF, FINAL, 3RD
-      { "home_team", "away_team", "home_score", "away_score", "group", "date", "scorers" }
-    ]
-  }
+RawSnapshot JSON structure:
+{
+  "games": [                                          // array of game objects
+    {
+      "_id":              string,                     // MongoDB ID
+      "id":               string | null,              // numeric ID
+      "home_team_id":     string | null,              // references Team._id
+      "away_team_id":     string | null,
+      "home_score":       string | null,              // e.g. "3"
+      "away_score":       string | null,
+      "home_scorers":     string | null,              // JSON array/object of scorers, e.g. '["Player (Team, 45\')"]' or "null"
+      "away_scorers":     string | null,
+      "group":            string | null,              // group letter (A-L) or knockout stage: "R32","R16","QF","SF","FINAL","3RD"
+      "matchday":         string | null,
+      "local_date":       string | null,              // "2026-06-14"
+      "persian_date":     string | null,
+      "stadium_id":       string | null,
+      "finished":         string | null,              // "TRUE" or null
+      "time_elapsed":     string | null,
+      "type":             string | null,
+      "home_team_name_en":  string | null,            // team display name (optional)
+      "home_team_name_fa":  string | null,
+      "away_team_name_en":  string | null,
+      "away_team_name_fa":  string | null,
+      "home_team_label":    string | null,
+      "away_team_label":    string | null
+    }
+  ],
+  "teams": [                                          // array of team objects
+    {
+      "_id":              string,                     // MongoDB ID (referenced by game.home_team_id / away_team_id)
+      "name_en":          string,                     // e.g. "Brazil"
+      "name_fa":          string | null,
+      "flag":             string | null,              // emoji or image URL
+      "fifa_code":        string | null,              // e.g. "BRA"
+      "iso2":             string | null,
+      "groups":           string | null,
+      "id":               string | null               // numeric ID
+    }
+  ],
+  "groups": [                                         // array of group standings
+    {
+      "_id":              string,
+      "name":             string,                     // group letter: "A", "B", ..., "L"
+      "teams": [                                      // 4 teams per group, sorted by pts desc
+        {
+          "team_id":      string,                     // references Team._id
+          "mp":           string,                     // matches played
+          "w":            string,                     // wins
+          "l":            string,                     // losses
+          "d":            string,                     // draws
+          "pts":          string,                     // points
+          "gf":           string,                     // goals for
+          "ga":           string,                     // goals against
+          "gd":           string,                     // goal difference
+          "_id":          string
+        }
+      ],
+      "createdAt":        string | null,
+      "updatedAt":        string | null,
+      "__v":              int | null
+    }
+  ]
+}
 
-Use the output of this tool as input for save_data to persist results to disk.
+━━━ OUTPUT (JSON object) ━━━
+{
+  "generated_at":       int,                          // Unix timestamp in milliseconds
+  "total_matches":      int,                          // total games in snapshot
+  "finished_matches":   int,                          // games with finished="TRUE"
+  "upcoming_matches":   int,                          // games not yet finished
+  "group_standings": [                                // all groups A-L
+    {
+      "_id":    string,
+      "name":   string,                               // group letter
+      "teams": [                                      // sorted by pts descending
+        { "team_id", "mp", "w", "l", "d", "pts", "gf", "ga", "gd", "_id" }
+      ]
+    }
+  ],
+  "recent_results": [                                 // last 20 finished games, sorted by date desc
+    { "home_team", "away_team", "home_score", "away_score", "group", "date", "scorers" }
+  ],
+  "top_scorers": [                                    // aggregated from all finished games
+    { "player": string, "goals": int, "team": string }
+  ],
+  "knockout_matches": [                               // R32 / R16 / QF / SF / FINAL / 3RD
+    { "home_team", "away_team", "home_score", "away_score", "group", "date", "scorers" }
+  ]
+}
+
+TIP: Pipe the output JSON into save_data's "content" parameter to persist to disk.
         """.trimIndent(),
         inputSchema = ToolSchema(
             properties = buildJsonObject {
@@ -104,14 +170,30 @@ Use the output of this tool as input for save_data to persist results to disk.
     mcpServer.addTool(
         name = "save_data",
         description = """
-Saves raw text content to a file on the server's local filesystem.
+Saves any raw text content to a file on the server's local filesystem.
+Useful for persisting JSON, CSV, markdown, logs, or any text output to disk.
 
-PARAMETERS:
-  - "content" (string, REQUIRED): Raw text content to save to a file.
-  - "format" (string, OPTIONAL, default "txt"): File extension for the output file (e.g. "txt", "json", "md", "csv").
+━━━ INPUT PARAMETERS ━━━
+  "content" (string, REQUIRED):
+    The raw text to write to the file. Accepts any string — JSON, plain text, markdown, CSV, etc.
+    Pass the full output of summarize_data here to persist the summary JSON.
 
-RESPONSE:
-  Plain text: "Saved to: <absolute-file-path>"
+  "format" (string, OPTIONAL, default "txt"):
+    File extension (without dot). Determines the output file name:
+      "txt"   → data/data_YYYYMMDD_HHmmss.txt
+      "json"  → data/data_YYYYMMDD_HHmmss.json
+      "md"    → data/data_YYYYMMDD_HHmmss.md
+      "csv"   → data/data_YYYYMMDD_HHmmss.csv
+      (any extension works)
+
+━━━ OUTPUT ━━━
+  Plain text response: "Saved to: /absolute/path/to/data/data_YYYYMMDD_HHmmss.<format>"
+
+━━━ EXAMPLE ━━━
+  1. Call summarize_data with raw_data
+  2. Take the JSON output
+  3. Call save_data with content=<that JSON> and format="json"
+  → File saved as data/data_20260626_143022.json
         """.trimIndent(),
         inputSchema = ToolSchema(
             properties = buildJsonObject {
