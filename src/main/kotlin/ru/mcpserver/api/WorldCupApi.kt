@@ -1,12 +1,21 @@
-package ru.mcpserver
+package ru.mcpserver.api
 
-import io.ktor.client.*
-import io.ktor.client.call.*
-import io.ktor.client.plugins.*
-import io.ktor.client.plugins.contentnegotiation.*
-import io.ktor.client.request.*
-import io.ktor.serialization.kotlinx.json.*
+import io.ktor.client.HttpClient
+import io.ktor.client.call.body
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.get
+import io.ktor.client.request.parameter
+import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import ru.mcpserver.common.GameWrapper
+import ru.mcpserver.common.GamesResponse
+import ru.mcpserver.common.GroupWrapper
+import ru.mcpserver.common.GroupsResponse
+import ru.mcpserver.common.StadiumWrapper
+import ru.mcpserver.common.StadiumsResponse
+import ru.mcpserver.common.TeamWrapper
+import ru.mcpserver.common.TeamsResponse
 
 class WorldCupApi(private val baseUrl: String = "https://worldcup26.ir") {
     private val json = Json {

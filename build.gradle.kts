@@ -1,3 +1,5 @@
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
@@ -9,7 +11,7 @@ group = "ru.mcpserver"
 version = "1.0.0"
 
 application {
-    mainClass.set("ru.mcpserver.McpServerKt")
+    mainClass.set("ru.mcpserver.api.DataApiServerKt")
     applicationDefaultJvmArgs = listOf("-Xmx512m")
 }
 
@@ -37,6 +39,24 @@ dependencies {
     implementation(libs.mcp.server)
 }
 
+val shadowJarApi by tasks.registering(ShadowJar::class) {
+    description = "Builds a fat JAR for the API data server (port 4453) with all get_* and search_* tools"
+    archiveClassifier.set("api")
+    mergeServiceFiles()
+    manifest.attributes("Main-Class" to "ru.mcpserver.api.DataApiServerKt")
+    from(sourceSets.main.get().output)
+    configurations = listOf(project.configurations.runtimeClasspath.get())
+}
+
+val shadowJarPipeline by tasks.registering(ShadowJar::class) {
+    description = "Builds a fat JAR for the Pipeline server (port 4455) with summarize_data and save_data tools"
+    archiveClassifier.set("pipeline")
+    mergeServiceFiles()
+    manifest.attributes("Main-Class" to "ru.mcpserver.pipeline.PipelineServerKt")
+    from(sourceSets.main.get().output)
+    configurations = listOf(project.configurations.runtimeClasspath.get())
+}
+
 tasks.build {
-    dependsOn(tasks.shadowJar)
+    dependsOn(shadowJarApi, shadowJarPipeline)
 }

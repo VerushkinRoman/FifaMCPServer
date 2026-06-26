@@ -1,4 +1,4 @@
-package ru.mcpserver
+package ru.mcpserver.common
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

@@ -1,38 +1,25 @@
-package ru.mcpserver
+package ru.mcpserver.pipeline
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
+import ru.mcpserver.common.Game
+import ru.mcpserver.common.GameResult
+import ru.mcpserver.common.MatchSummary
+import ru.mcpserver.common.RawSnapshot
+import ru.mcpserver.common.ScorerEntry
 import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-class PipelineTools(private val api: WorldCupApi) {
+class PipelineTools {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
     private val outputJson = Json { prettyPrint = true }
 
-    suspend fun search(dataType: String = "all"): RawSnapshot {
-        val games = if (dataType in listOf("games", "all")) {
-            api.getGames().games
-        } else emptyList()
-
-        val teams = if (dataType in listOf("teams", "all")) {
-            api.getTeams().teams
-        } else emptyList()
-
-        val groups = if (dataType in listOf("groups", "all")) {
-            api.getGroups().groups
-        } else emptyList()
-
-        return RawSnapshot(games = games, teams = teams, groups = groups)
-    }
-
-    suspend fun summarize(): MatchSummary {
-        val snapshot = search("all")
-
+    fun summarize(snapshot: RawSnapshot): MatchSummary {
         val finished = snapshot.games.filter { it.finished == "TRUE" }
 
         val teamNameById = snapshot.teams.associate { it.mongoId to it.nameEn }
@@ -97,9 +84,7 @@ class PipelineTools(private val api: WorldCupApi) {
         )
     }
 
-    suspend fun save(format: String = "json"): String {
-        val summary = summarize()
-
+    fun save(summary: MatchSummary, format: String = "json"): String {
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
         val dir = File("data")
         dir.mkdirs()

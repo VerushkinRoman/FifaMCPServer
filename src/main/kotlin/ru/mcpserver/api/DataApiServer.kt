@@ -1,4 +1,4 @@
-package ru.mcpserver
+package ru.mcpserver.api
 
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
@@ -15,10 +15,10 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import ru.mcpserver.common.RawSnapshot
 
 fun main() {
     val api = WorldCupApi()
-    val pipe = PipelineTools(api)
 
     val outputJson = Json {
         prettyPrint = true
@@ -26,7 +26,7 @@ fun main() {
 
     val mcpServer = Server(
         serverInfo = Implementation(
-            name = "worldcup-mcp-server",
+            name = "worldcup-api-server",
             version = "1.0.0"
         ),
         options = ServerOptions(
@@ -280,12 +280,6 @@ RESPONSE FORMAT (JSON object with one key):
     ]
   }
 
-KEY FIELD NOTES:
-  - finished = "TRUE" → match is complete; scores and scorers are final
-  - finished = null   → match has not been played yet (or is in progress, check time_elapsed)
-  - home_scorers / away_scorers: JSON strings like '["Player Name (team, 45' )", ...]' or null
-  - group field: group stage = "A" through "L"; knockout = "R32","R16","QF","SF","FINAL","3RD"
-
 USE WHEN: you need the full match schedule, find upcoming matches, check results of played matches, analyze scorers, or filter by group/knockout stage. For a SINGLE match by ID, use get_game.
         """.trimIndent()
     ) { _ ->
@@ -333,8 +327,6 @@ RESPONSE FORMAT (JSON object with one key):
       "away_team_label":    string | null
     }
   }
-
-ALL FIELDS are identical to those in get_games, but for a SINGLE match.
 
 USE WHEN: you already know a match's MongoDB ID (obtained from get_games) and need full details for that specific match. For ALL matches, use get_games.
         """.trimIndent(),
@@ -452,45 +444,28 @@ USE WHEN: you need details for a specific stadium (capacity, city, FIFA name). F
     }
 
     mcpServer.addTool(
-        name = "search_data",
+        name = "search_all",
         description = """
-FIRST STEP of the data pipeline. Fetches RAW data from the World Cup 2026 API and returns a combined snapshot of games, teams, and/or groups.
+Fetches RAW data for ALL categories — games, teams, and groups — from the World Cup 2026 API.
 
-PARAMETERS:
-  - "data_type" (string, OPTIONAL, default "all"): what to fetch:
-      "all"    → games + teams + groups (full snapshot)
-      "games"  → only games (matches and results)
-      "teams"  → only team info
-      "groups" → only group standings
+NO PARAMETERS REQUIRED.
 
 RESPONSE FORMAT (JSON object):
   {
-    "games":  [ ... ]    // same format as get_games response (games array)
-    "teams":  [ ... ]    // same format as get_teams response (teams array)
-    "groups": [ ... ]    // same format as get_groups response (groups array)
+    "games":  [ ... ]    // all matches (same format as get_games)
+    "teams":  [ ... ]    // all 48 teams (same format as get_teams)
+    "groups": [ ... ]    // all 12 groups (same format as get_groups)
   }
 
-Note: only the requested data_type sections will contain data — others will be empty arrays.
-
-USE WHEN: you need a RAW, UNPROCESSED data dump for manual analysis or filtering. For an automatic aggregated summary (group standings + top scorers + results), use summarize_data directly instead.
-        """.trimIndent(),
-        inputSchema = ToolSchema(
-            properties = buildJsonObject {
-                put("data_type", buildJsonObject {
-                    put("type", "string")
-                    put(
-                        "description",
-                        "Data to fetch: 'all' (default, fetches everything), 'games', 'teams', or 'groups'"
-                    )
-                })
-            },
-            required = listOf()
-        )
-    ) { request ->
+USE WHEN: you need a COMPLETE raw data dump for manual analysis or further processing. For individual categories use search_games, search_teams, or search_groups.
+        """.trimIndent()
+    ) { _ ->
         try {
-            val dataType =
-                request.arguments?.get("data_type")?.jsonPrimitive?.contentOrNull ?: "all"
-            val snapshot = pipe.search(dataType)
+            val snapshot = RawSnapshot(
+                games = api.getGames().games,
+                teams = api.getTeams().teams,
+                groups = api.getGroups().groups
+            )
             val text = outputJson.encodeToString(RawSnapshot.serializer(), snapshot)
             CallToolResult(content = listOf(TextContent(text)))
         } catch (e: Exception) {
@@ -499,53 +474,25 @@ USE WHEN: you need a RAW, UNPROCESSED data dump for manual analysis or filtering
     }
 
     mcpServer.addTool(
-        name = "summarize_data",
+        name = "search_games",
         description = """
-Aggregates ALL World Cup 2026 data and returns a structured summary with group standings (ALL 12 groups A-L), recent results, top scorers, and knockout matches. Always fetches fresh data from the API for maximum accuracy — does NOT rely on data passed from search_data.
+Fetches RAW games data from the World Cup 2026 API — all matches and results.
 
-NO PARAMETERS REQUIRED (raw_data parameter is accepted but ignored; the tool always fetches complete data).
+NO PARAMETERS REQUIRED.
 
 RESPONSE FORMAT (JSON object):
   {
-    "generated_at":      int (Unix timestamp in milliseconds),
-    "total_matches":     int (total number of matches),
-    "finished_matches":  int (matches with finished="TRUE"),
-    "upcoming_matches":  int (matches not yet finished),
-    "group_standings": [                                        // ALL groups A-L, 12 items
-      {
-        "_id":      string,
-        "name":     string (group letter A-L),
-        "teams": [                                              // 4 teams each, sorted by pts
-          { "team_id", "mp", "w", "l", "d", "pts", "gf", "ga", "gd", "_id" }
-        ]
-      }
-    ],
-    "recent_results": [                                         // last 20 finished, sorted by date
-      { "home_team", "away_team", "home_score", "away_score", "group", "date", "scorers" }
-    ],
-    "top_scorers": [                                            // sorted by goals descending
-      { "player", "goals": int, "team" }
-    ],
-    "knockout_matches": [                                       // R32, R16, QF, SF, FINAL, 3RD
-      { "home_team", "away_team", "home_score", "away_score", "group", "date", "scorers" }
-    ]
+    "games":  [ ... ]    // all matches (same format as get_games)
+    "teams":  [ ]        // empty
+    "groups": [ ]        // empty
   }
 
-USE WHEN: you want to see COMPLETE aggregated standings, results, top scorers, and knockout info. Always returns all 12 groups. Pipe the output into save_data to persist to a file.
-        """.trimIndent(),
-        inputSchema = ToolSchema(
-            properties = buildJsonObject {
-                put("raw_data", buildJsonObject {
-                    put("type", "string")
-                    put("description", "DEPRECATED — ignored. The tool always uses fresh API data.")
-                })
-            },
-            required = listOf()
-        )
+USE WHEN: you need raw/unprocessed match data for custom filtering or analysis.
+        """.trimIndent()
     ) { _ ->
         try {
-            val summary = pipe.summarize()
-            val text = outputJson.encodeToString(MatchSummary.serializer(), summary)
+            val snapshot = RawSnapshot(games = api.getGames().games)
+            val text = outputJson.encodeToString(RawSnapshot.serializer(), snapshot)
             CallToolResult(content = listOf(TextContent(text)))
         } catch (e: Exception) {
             CallToolResult(content = listOf(TextContent("Error: ${e.message ?: e.javaClass.simpleName}")))
@@ -553,58 +500,59 @@ USE WHEN: you want to see COMPLETE aggregated standings, results, top scorers, a
     }
 
     mcpServer.addTool(
-        name = "save_data",
+        name = "search_teams",
         description = """
-Saves a complete World Cup 2026 summary to a file on the server's local filesystem. Always generates fresh data from the API.
+Fetches RAW teams data from the World Cup 2026 API — all 48 participating teams.
 
-PARAMETERS:
-  - "format" (string, OPTIONAL, default "json"): output file format:
-      "json" → saves as pretty-printed JSON (data/summary_YYYYMMDD_HHmmss.json)
-      "txt"  → saves as human-readable formatted table (data/summary_YYYYMMDD_HHmmss.txt)
+NO PARAMETERS REQUIRED.
 
-RESPONSE:
-  Plain text: "Saved to: <absolute-file-path>"
+RESPONSE FORMAT (JSON object):
+  {
+    "games":  [ ]        // empty
+    "teams":  [ ... ]    // all 48 teams (same format as get_teams)
+    "groups": [ ]        // empty
+  }
 
-When format="txt", the text file contains:
-  - Tournament overview (total/played/remaining matches)
-  - Group standings table for each group (A-L, with Team, P, W, D, L, GF, GA, GD, Pts)
-  - Recent results (last 10 finished matches with scorers)
-  - Top scorers leaderboard (top 15 players)
-  - Knockout rounds results with scorers
-
-USE WHEN: you want to PERSIST the summary to disk. Works standalone (always fetches fresh data) or as a pipeline step after summarize_data.
-        """.trimIndent(),
-        inputSchema = ToolSchema(
-            properties = buildJsonObject {
-                put("summary_data", buildJsonObject {
-                    put("type", "string")
-                    put(
-                        "description",
-                        "DEPRECATED — ignored. The tool always generates a fresh summary from the API."
-                    )
-                })
-                put("format", buildJsonObject {
-                    put("type", "string")
-                    put(
-                        "description",
-                        "Output format: 'json' (default, structured data) or 'txt' (human-readable formatted report)"
-                    )
-                })
-            },
-            required = listOf()
-        )
-    ) { request ->
+USE WHEN: you need raw/unprocessed team info for custom analysis.
+        """.trimIndent()
+    ) { _ ->
         try {
-            val format = request.arguments?.get("format")?.jsonPrimitive?.contentOrNull ?: "json"
-            val filePath = pipe.save(format = format)
-            CallToolResult(content = listOf(TextContent("Saved to: $filePath")))
+            val snapshot = RawSnapshot(teams = api.getTeams().teams)
+            val text = outputJson.encodeToString(RawSnapshot.serializer(), snapshot)
+            CallToolResult(content = listOf(TextContent(text)))
         } catch (e: Exception) {
             CallToolResult(content = listOf(TextContent("Error: ${e.message ?: e.javaClass.simpleName}")))
         }
     }
 
-    println("Starting World Cup MCP Server on port 4455...")
-    embeddedServer(CIO, host = "127.0.0.1", port = 4455) {
+    mcpServer.addTool(
+        name = "search_groups",
+        description = """
+Fetches RAW group standings from the World Cup 2026 API — all 12 groups A-L.
+
+NO PARAMETERS REQUIRED.
+
+RESPONSE FORMAT (JSON object):
+  {
+    "games":  [ ]        // empty
+    "teams":  [ ]        // empty
+    "groups": [ ... ]    // all 12 groups (same format as get_groups)
+  }
+
+USE WHEN: you need raw/unprocessed group standings for custom analysis.
+        """.trimIndent()
+    ) { _ ->
+        try {
+            val snapshot = RawSnapshot(groups = api.getGroups().groups)
+            val text = outputJson.encodeToString(RawSnapshot.serializer(), snapshot)
+            CallToolResult(content = listOf(TextContent(text)))
+        } catch (e: Exception) {
+            CallToolResult(content = listOf(TextContent("Error: ${e.message ?: e.javaClass.simpleName}")))
+        }
+    }
+
+    println("Starting World Cup API Data Server on port 4453...")
+    embeddedServer(CIO, host = "127.0.0.1", port = 4453) {
         mcpStreamableHttp {
             mcpServer
         }
