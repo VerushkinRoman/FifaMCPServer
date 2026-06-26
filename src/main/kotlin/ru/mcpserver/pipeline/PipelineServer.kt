@@ -104,52 +104,40 @@ Use the output of this tool as input for save_data to persist results to disk.
     mcpServer.addTool(
         name = "save_data",
         description = """
-Saves a MatchSummary to a file on the server's local filesystem.
+Saves raw text content to a file on the server's local filesystem.
 
 PARAMETERS:
-  - "summary_data" (string, REQUIRED): JSON string of a MatchSummary object obtained from summarize_data.
-  - "format" (string, OPTIONAL, default "json"): output file format:
-      "json" → saves as pretty-printed JSON (data/summary_YYYYMMDD_HHmmss.json)
-      "txt"  → saves as human-readable formatted table (data/summary_YYYYMMDD_HHmmss.txt)
+  - "content" (string, REQUIRED): Raw text content to save to a file.
+  - "format" (string, OPTIONAL, default "txt"): File extension for the output file (e.g. "txt", "json", "md", "csv").
 
 RESPONSE:
   Plain text: "Saved to: <absolute-file-path>"
-
-When format="txt", the text file contains:
-  - Tournament overview (total/played/remaining matches)
-  - Group standings table for each group (A-L, with Team, P, W, D, L, GF, GA, GD, Pts)
-  - Recent results (last 10 finished matches with scorers)
-  - Top scorers leaderboard (top 15 players)
-  - Knockout rounds results with scorers
-
-Pass the JSON output from summarize_data as the summary_data parameter.
         """.trimIndent(),
         inputSchema = ToolSchema(
             properties = buildJsonObject {
-                put("summary_data", buildJsonObject {
+                put("content", buildJsonObject {
                     put("type", "string")
                     put(
                         "description",
-                        "JSON string of a MatchSummary object obtained from summarize_data."
+                        "Raw text content to save to a file."
                     )
                 })
                 put("format", buildJsonObject {
                     put("type", "string")
                     put(
                         "description",
-                        "Output format: 'json' (default, structured data) or 'txt' (human-readable formatted report)"
+                        "File extension (default: 'txt'). Examples: 'txt', 'json', 'md', 'csv', 'html'."
                     )
                 })
             },
-            required = listOf("summary_data")
+            required = listOf("content")
         )
     ) { request ->
         try {
-            val summaryJson = request.arguments?.get("summary_data")?.jsonPrimitive?.contentOrNull
-                ?: return@addTool CallToolResult(content = listOf(TextContent("Error: 'summary_data' parameter is required.")))
-            val summary = json.decodeFromString(MatchSummary.serializer(), summaryJson)
-            val format = request.arguments?.get("format")?.jsonPrimitive?.contentOrNull ?: "json"
-            val filePath = pipe.save(summary, format)
+            val content = request.arguments?.get("content")?.jsonPrimitive?.contentOrNull
+                ?: return@addTool CallToolResult(content = listOf(TextContent("Error: 'content' parameter is required.")))
+            val format = request.arguments?.get("format")?.jsonPrimitive?.contentOrNull ?: "txt"
+            val filePath = pipe.saveRaw(content, format)
             CallToolResult(content = listOf(TextContent("Saved to: $filePath")))
         } catch (e: Exception) {
             CallToolResult(content = listOf(TextContent("Error: ${e.message ?: e.javaClass.simpleName}")))

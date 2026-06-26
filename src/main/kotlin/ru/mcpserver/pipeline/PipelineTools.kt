@@ -17,7 +17,6 @@ import java.time.format.DateTimeFormatter
 class PipelineTools {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
-    private val outputJson = Json { prettyPrint = true }
 
     fun summarize(snapshot: RawSnapshot): MatchSummary {
         val finished = snapshot.games.filter { it.finished == "TRUE" }
@@ -84,84 +83,13 @@ class PipelineTools {
         )
     }
 
-    fun save(summary: MatchSummary, format: String = "json"): String {
+    fun saveRaw(text: String, extension: String = "txt"): String {
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
         val dir = File("data")
         dir.mkdirs()
-
-        return when (format) {
-            "txt" -> {
-                val text = generateTextSummary(summary)
-                val file = File(dir, "summary_$timestamp.txt")
-                file.writeText(text)
-                file.absolutePath
-            }
-
-            else -> {
-                val file = File(dir, "summary_$timestamp.json")
-                file.writeText(outputJson.encodeToString(MatchSummary.serializer(), summary))
-                file.absolutePath
-            }
-        }
-    }
-
-    private fun generateTextSummary(summary: MatchSummary): String {
-        val sb = StringBuilder()
-        sb.appendLine("=== WORLD CUP 2026 SUMMARY ===")
-        sb.appendLine("Total matches: ${summary.totalMatches}")
-        sb.appendLine("Played: ${summary.finishedMatches}")
-        sb.appendLine("Remaining: ${summary.upcomingMatches}")
-        sb.appendLine()
-
-        if (summary.groupStandings.isNotEmpty()) {
-            sb.appendLine("--- Group Standings ---")
-            for (group in summary.groupStandings) {
-                sb.appendLine("Group ${group.name}")
-                sb.appendLine(
-                    "%-6s %2s %2s %2s %2s %3s %3s %3s %3s".format(
-                        "Team", "P", "W", "D", "L", "GF", "GA", "GD", "Pts"
-                    )
-                )
-                sb.appendLine("-".repeat(30))
-                for (team in group.teams) {
-                    sb.appendLine(
-                        "%-6s %2s %2s %2s %2s %3s %3s %3s %3s".format(
-                            team.teamId.take(6), team.mp, team.w, team.d, team.l,
-                            team.gf, team.ga, team.gd, team.pts
-                        )
-                    )
-                }
-                sb.appendLine()
-            }
-        }
-
-        if (summary.recentResults.isNotEmpty()) {
-            sb.appendLine("--- Recent Results (top ${summary.recentResults.size}) ---")
-            for (gm in summary.recentResults.take(10)) {
-                sb.appendLine("${gm.homeTeam} ${gm.homeScore}:${gm.awayScore} ${gm.awayTeam}")
-                if (gm.scorers.isNotBlank()) sb.appendLine("  Goals: ${gm.scorers}")
-            }
-        }
-
-        if (summary.topScorers.isNotEmpty()) {
-            sb.appendLine()
-            sb.appendLine("--- Top Scorers ---")
-            summary.topScorers.take(15).forEachIndexed { i, scorer ->
-                val label = if (scorer.goals == 1) "goal" else "goals"
-                sb.appendLine("${i + 1}. ${scorer.player} (${scorer.team}) - ${scorer.goals} $label")
-            }
-        }
-
-        if (summary.knockoutMatches.isNotEmpty()) {
-            sb.appendLine()
-            sb.appendLine("--- Knockout Rounds ---")
-            for (gm in summary.knockoutMatches) {
-                sb.appendLine("${gm.homeTeam} ${gm.homeScore}:${gm.awayScore} ${gm.awayTeam}")
-                if (gm.scorers.isNotBlank()) sb.appendLine("  Goals: ${gm.scorers}")
-            }
-        }
-
-        return sb.toString()
+        val file = File(dir, "data_$timestamp.$extension")
+        file.writeText(text)
+        return file.absolutePath
     }
 
     private fun parseScorers(raw: String?): List<RawScorer> {
